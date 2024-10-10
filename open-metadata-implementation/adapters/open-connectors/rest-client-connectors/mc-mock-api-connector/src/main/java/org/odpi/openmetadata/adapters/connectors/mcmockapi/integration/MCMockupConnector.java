@@ -32,13 +32,14 @@ import java.net.http.HttpResponse;
 
 public class MCMockupConnector extends CatalogIntegratorConnector {
 //public class MCMockupConnector {
-    private String                                         targetRootURL                             = null;
+    private String                                         targetRootURL                             = "http://localhost:8080/";
     private CatalogIntegratorContext                       myContext                                 = null;
     //protected final DataAssetExchangeService   dataAssetExchangeService                              = null;
     protected DataAssetExchangeService dataAssetExchangeService                                      = null;
 
     // not sure where this will get called. ApacheAtlasIntegrationConnector doesn't seem to have an explicit constructor
 
+    /*
     public MCMockupConnector(CatalogIntegratorContext myContext)
     {
         this.targetRootURL = "https://localhost:8080/";
@@ -52,13 +53,16 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
             e.printStackTrace();
         }
     }
+     */
 
 
-
+/*
     public MCMockupConnector()
     {
         this.targetRootURL = "http://localhost:8080/";
     }
+
+ */
 
 
     /* ==============================================================================
@@ -77,6 +81,18 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
     //public void refresh() throws Exception
     {
         final String methodName = "refresh";
+
+
+        myContext = super.getContext();
+        try {
+            dataAssetExchangeService = myContext.getDataAssetExchangeService();
+        }
+        catch (UserNotAuthorizedException e)
+        //catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+
 
         // hit the mock REST API and get info for all databases
         // create externalIdentifierProperties and DataAssetProperties from mock metadata
@@ -102,23 +118,51 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
                 Date lastModifiedDate = formatter.parse(dateString);
                 String resourceName = resource.get("resourceName").asText();
                 Map<String, String> additionalProperties = new HashMap<>();
+                JsonNode columnsNode = resource.get("columns");
+                if (!columnsNode.isEmpty()) {
+                    ArrayList<String> columns = new ArrayList<String>();
+                    for (JsonNode element : columnsNode) {
+                        String value = element.asText();
+                        columns.add(value);
+                    }
+                    additionalProperties.put("Columns", columns.toString());
+                }
+
                 additionalProperties.put("Data Owner", resource.get("dataOwner").asText());
                 additionalProperties.put("Data Steward", resource.get("dataSteward").asText());
                 additionalProperties.put("Data Domain", resource.get("compositeDataDomain").asText());
+                additionalProperties.put("External Resource ID", resource.get("id").asText());
+                additionalProperties.put("External Instance Last Update Time", lastModifiedDate.toString());
+                additionalProperties.put("External Identifier Name", "MC Informatica Data Catalog ID");
+
 
                 externalIdentifierProperties.setExternalIdentifier(resource.get("id").asText());
                 externalIdentifierProperties.setExternalInstanceLastUpdateTime(lastModifiedDate);
                 externalIdentifierProperties.setExternalIdentifierName("MC Informatica Data Catalog ID");
 
+                dataAssetProperties.setQualifiedName(myContext.getMetadataSourceQualifiedName() + ":MC-Mock-API:" + resource.get("id").asText());
                 dataAssetProperties.setDisplayName(resourceName);
                 dataAssetProperties.setName(resourceName);
                 dataAssetProperties.setDisplayDescription(resource.get("businessDescription").asText());
-                dataAssetProperties.setTypeName(resource.get("resourceType").asText());
+                dataAssetProperties.setResourceDescription(resource.get("resourceType").asText());
+
+                //this is ORACLE in the resource coming from the Mock API
+                //but i think Egeria is looking for something like String
+                //dataAssetProperties.setTypeName(resource.get("resourceType").asText());
+                dataAssetProperties.setTypeName("DataAsset");
                 dataAssetProperties.setAdditionalProperties(additionalProperties);
+                System.out.println("Data Asset Properties: ");
+                System.out.println(dataAssetProperties.toString());
+
 
                 String egeriaDatabaseGUID = dataAssetExchangeService.createDataAsset(true,
                         externalIdentifierProperties,
                         dataAssetProperties);
+                System.out.println("Asset GUID: ");
+                System.out.println(egeriaDatabaseGUID);
+
+
+
                 /*
                 auditLog.logMessage(methodName,
                         AtlasIntegrationAuditCode.CREATING_EGERIA_ENTITY.getMessageDefinition(connectorName,
@@ -166,10 +210,18 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
         return "Todo";
     }
 
+    //this should only get called when I'm testing
     public static void main(String[] args) {
         System.out.println("main method");
         MCMockupConnector conn = new MCMockupConnector();
-        conn.getResourceInfoFromMockAPI();
+        //conn.getResourceInfoFromMockAPI();
+        try {
+            conn.refresh();
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+        }
+
 
     }
 

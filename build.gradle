@@ -17,6 +17,7 @@ plugins {
     // This plugin helps resolve jakarta/javax dev.jacomet.logging-capabilities
     id 'org.gradlex.java-ecosystem-capabilities'
     id 'checkstyle'
+    id 'application'
 }
 
 /*
@@ -314,3 +315,5 @@ dependencyAnalysis {
 
 // Always run dependency check for every regular build
 build.dependsOn("buildHealth")
+mainClassName = 'org.odpi.openmetadata.adapters.connectors.mcmockapi.integration.MCMockupConnector'
+
