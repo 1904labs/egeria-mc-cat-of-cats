@@ -6,8 +6,6 @@ package org.odpi.openmetadata.adapters.connectors.mcmockapi.integration;
 //import org.odpi.openmetadata.accessservices.assetmanager.metadataelements.ValidValueElement;
 //import org.odpi.openmetadata.adapters.connectors.apacheatlas.integration.ffdc.AtlasIntegrationAuditCode;
 //import org.odpi.openmetadata.adapters.connectors.apacheatlas.integration.ffdc.AtlasIntegrationErrorCode;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import org.odpi.openmetadata.adapters.connectors.apacheatlas.integration.ffdc.AtlasIntegrationAuditCode;
 import org.odpi.openmetadata.frameworks.connectors.ffdc.ConnectorCheckedException;
 //import org.odpi.openmetadata.frameworks.openmetadata.enums.PermittedSynchronization;
 import org.odpi.openmetadata.frameworks.connectors.ffdc.UserNotAuthorizedException;
@@ -18,10 +16,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.odpi.openmetadata.frameworks.openmetadata.properties.assets.DataAssetProperties;
 import org.odpi.openmetadata.frameworks.governanceaction.properties.ExternalIdentifierProperties;
-import org.odpi.openmetadata.frameworks.auditlog.AuditLog;
-import java.util.ArrayList;
-import java.util.HashMap;
+
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Date;
 import java.text.SimpleDateFormat;
@@ -29,31 +26,18 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 public class MCMockupConnector extends CatalogIntegratorConnector {
 //public class MCMockupConnector {
-    private String                                         targetRootURL                             = "http://localhost:8080/";
+    private String                                         targetRootURL                             = "http://mc-mock-api:8080/";
+    //private String                                         targetRootURL                             = "http://localhost:8080/";
     private CatalogIntegratorContext                       myContext                                 = null;
     //protected final DataAssetExchangeService   dataAssetExchangeService                              = null;
     protected DataAssetExchangeService dataAssetExchangeService                                      = null;
 
     // not sure where this will get called. ApacheAtlasIntegrationConnector doesn't seem to have an explicit constructor
-
-    /*
-    public MCMockupConnector(CatalogIntegratorContext myContext)
-    {
-        this.targetRootURL = "https://localhost:8080/";
-        this.myContext = myContext;
-        try {
-            this.dataAssetExchangeService = myContext.getDataAssetExchangeService(); //not sure why it doesn't like this
-        }
-        //catch (UserNotAuthorizedException e)
-        catch (Exception e)
-        {
-            e.printStackTrace();
-        }
-    }
-     */
 
 
 /*
@@ -78,7 +62,6 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
      */
     @Override
     public void refresh() throws ConnectorCheckedException
-    //public void refresh() throws Exception
     {
         final String methodName = "refresh";
 
@@ -88,7 +71,6 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
             dataAssetExchangeService = myContext.getDataAssetExchangeService();
         }
         catch (UserNotAuthorizedException e)
-        //catch (Exception e)
         {
             e.printStackTrace();
         }
@@ -116,23 +98,33 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
                 String dateString = resource.get("lastModifiedDate").asText();
                 SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMdd");
                 Date lastModifiedDate = formatter.parse(dateString);
-                String resourceName = resource.get("resourceName").asText();
+                String resourceName = resource.get("name").asText();
                 Map<String, String> additionalProperties = new HashMap<>();
-                JsonNode columnsNode = resource.get("columns");
-                if (!columnsNode.isEmpty()) {
-                    ArrayList<String> columns = new ArrayList<String>();
-                    for (JsonNode element : columnsNode) {
-                        String value = element.asText();
-                        columns.add(value);
-                    }
-                    additionalProperties.put("Columns", columns.toString());
+                Map<String, Object> extendedProperties = new HashMap<>();
+                JsonNode tablesNode = resource.get("tables");
+
+                // just plopping everything in the tables list into an additional property
+                if (!tablesNode.isEmpty()) {
+                    System.out.println("TablesNode: ");
+                    additionalProperties.put("Tables", tablesNode.toString());
                 }
 
-                additionalProperties.put("Data Owner", resource.get("dataOwner").asText());
+                // extended properties. should be searchable
+                extendedProperties.put("schema", resource.get("schema").asText());
+                extendedProperties.put("catalog", resource.get("catalog").asText());
+                extendedProperties.put("verified", resource.get("verified").asText());
+                extendedProperties.put("verifiedBy", resource.get("verifiedBy").asText());
+                extendedProperties.put("verifiedDate", resource.get("verifiedDate").asText());
+                extendedProperties.put("subjectMatterExperts", resource.get("subjectMatterExperts").toString());
+                extendedProperties.put("externalResourceId", resource.get("id").asText());
+                extendedProperties.put("businessDescription", resource.get("businessDescription").asText());
+                extendedProperties.put("externalInstanceUpdateTime", lastModifiedDate.toString());
+
+                // not searchable at the moment
+                additionalProperties.put("Data Owner", resource.get("dataOwner").toString());
                 additionalProperties.put("Data Steward", resource.get("dataSteward").asText());
+                additionalProperties.put("Tags", resource.get("tags").toString());
                 additionalProperties.put("Data Domain", resource.get("compositeDataDomain").asText());
-                additionalProperties.put("External Resource ID", resource.get("id").asText());
-                additionalProperties.put("External Instance Last Update Time", lastModifiedDate.toString());
                 additionalProperties.put("External Identifier Name", "MC Informatica Data Catalog ID");
 
 
@@ -145,12 +137,14 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
                 dataAssetProperties.setName(resourceName);
                 dataAssetProperties.setDisplayDescription(resource.get("businessDescription").asText());
                 dataAssetProperties.setResourceDescription(resource.get("resourceType").asText());
+                //doesn't like this for some reason
+                //dataAssetProperties.setDeployedImplementationType(resource.get("resourceType").asText());
 
-                //this is ORACLE in the resource coming from the Mock API
-                //but i think Egeria is looking for something like String
-                //dataAssetProperties.setTypeName(resource.get("resourceType").asText());
-                dataAssetProperties.setTypeName("DataAsset");
+
+                //dataAssetProperties.setTypeName("DataAsset");
+                dataAssetProperties.setTypeName("DemoAsset");
                 dataAssetProperties.setAdditionalProperties(additionalProperties);
+                dataAssetProperties.setExtendedProperties(extendedProperties);
                 System.out.println("Data Asset Properties: ");
                 System.out.println(dataAssetProperties.toString());
 
@@ -195,8 +189,14 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(this.targetRootURL + "resource-descriptions?resource_name=*"))
                 .build();
+        System.out.println("HTTP Request: ");
+        System.out.println(request.uri());
+        System.out.println("Request headers:");
+        System.out.println(request.headers());
+
         try {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            System.out.println("Response status code: " + response.statusCode());
             System.out.println("response body: ");
             System.out.println(response.body());
             return response.body();
@@ -205,6 +205,9 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
         {
             System.out.println("Error sending the request to the API.");
             e.printStackTrace();
+            System.out.println("Exception message: " + e.getMessage());
+            System.out.println("Exception class: " + e.getClass().getName());
+            System.out.println("Exception cause: " + e.getCause());
         }
 
         return "Todo";
@@ -212,7 +215,6 @@ public class MCMockupConnector extends CatalogIntegratorConnector {
 
     //this should only get called when I'm testing
     public static void main(String[] args) {
-        System.out.println("main method");
         MCMockupConnector conn = new MCMockupConnector();
         //conn.getResourceInfoFromMockAPI();
         try {
